@@ -142,7 +142,7 @@ class AddPositionEmbedding(pz.nn.Layer):
     return tokens + pos_embeddings
 
 
-@pz.pytree_dataclass
+@pz.pytree_dataclass(has_implicitly_inherited_fields=True)
 class Gemma3VisionBlock(pz.nn.Sequential):
   """Transformer block used in the Gemma-3 vision tower."""
 
