@@ -294,6 +294,7 @@ class Gemma3VisionTower(pz.nn.Layer):
     hidden = self.patch_embed(images)
     hidden = pz.nn.CastToDType(self.config.activation_dtype)(hidden)
     hidden = self.position_embed(hidden)
+    hidden = pz.nn.CastToDType(self.config.activation_dtype)(hidden)
     hidden = self.blocks(hidden, **side_inputs)
     return self.final_norm(hidden)
 
