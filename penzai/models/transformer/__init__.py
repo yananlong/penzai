@@ -15,6 +15,7 @@
 """Basic transformer backbone with variants."""
 
 from . import model_parts
+from . import model_surface
 from . import sampling_mode
 from . import simple_decoding_loop
 from . import variants

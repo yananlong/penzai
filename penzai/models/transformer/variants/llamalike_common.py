@@ -434,48 +434,78 @@ def build_llamalike_block(
     A full transformer block.
   """
   attn_sequence = [
-      pz.nn.RMSLayerNorm.from_config(
-          name=f"{name}/pre_attention_norm",
-          init_base_rng=init_base_rng,
-          across_axes={"embedding": config.embedding_dim},
-          dtype=config.parameter_dtype,
-          epsilon=config.rms_norm_eps,
+      pz.nn.NamedGroup(
+          "pre_attention_norm",
+          [
+              pz.nn.RMSLayerNorm.from_config(
+                  name=f"{name}/pre_attention_norm",
+                  init_base_rng=init_base_rng,
+                  across_axes={"embedding": config.embedding_dim},
+                  dtype=config.parameter_dtype,
+                  epsilon=config.rms_norm_eps,
+              ),
+          ],
       ),
-      build_llamalike_attention(
-          f"{name}/attention",
-          init_base_rng,
-          config,
-          block_index=block_index,
+      pz.nn.NamedGroup(
+          "attention",
+          [
+              build_llamalike_attention(
+                  f"{name}/attention",
+                  init_base_rng,
+                  config,
+                  block_index=block_index,
+              ),
+          ],
       ),
   ]
   if config.use_post_attn_norm:
     attn_sequence.append(
-        pz.nn.RMSLayerNorm.from_config(
-            name=f"{name}/post_attention_norm",
-            init_base_rng=init_base_rng,
-            across_axes={"embedding": config.embedding_dim},
-            dtype=config.parameter_dtype,
-            epsilon=config.rms_norm_eps,
+        pz.nn.NamedGroup(
+            "post_attention_norm",
+            [
+                pz.nn.RMSLayerNorm.from_config(
+                    name=f"{name}/post_attention_norm",
+                    init_base_rng=init_base_rng,
+                    across_axes={"embedding": config.embedding_dim},
+                    dtype=config.parameter_dtype,
+                    epsilon=config.rms_norm_eps,
+                ),
+            ],
         )
     )
   ffw_sequence = [
-      pz.nn.RMSLayerNorm.from_config(
-          name=f"{name}/pre_ffw_norm",
-          init_base_rng=init_base_rng,
-          across_axes={"embedding": config.embedding_dim},
-          dtype=config.parameter_dtype,
-          epsilon=config.rms_norm_eps,
+      pz.nn.NamedGroup(
+          "pre_ffw_norm",
+          [
+              pz.nn.RMSLayerNorm.from_config(
+                  name=f"{name}/pre_ffw_norm",
+                  init_base_rng=init_base_rng,
+                  across_axes={"embedding": config.embedding_dim},
+                  dtype=config.parameter_dtype,
+                  epsilon=config.rms_norm_eps,
+              ),
+          ],
       ),
-      build_llamalike_feedforward(f"{name}/mlp", init_base_rng, config),
+      pz.nn.NamedGroup(
+          "mlp",
+          [
+              build_llamalike_feedforward(f"{name}/mlp", init_base_rng, config),
+          ],
+      ),
   ]
   if config.use_post_ffw_norm:
     ffw_sequence.append(
-        pz.nn.RMSLayerNorm.from_config(
-            name=f"{name}/post_ffw_norm",
-            init_base_rng=init_base_rng,
-            across_axes={"embedding": config.embedding_dim},
-            dtype=config.parameter_dtype,
-            epsilon=config.rms_norm_eps,
+        pz.nn.NamedGroup(
+            "post_ffw_norm",
+            [
+                pz.nn.RMSLayerNorm.from_config(
+                    name=f"{name}/post_ffw_norm",
+                    init_base_rng=init_base_rng,
+                    across_axes={"embedding": config.embedding_dim},
+                    dtype=config.parameter_dtype,
+                    epsilon=config.rms_norm_eps,
+                ),
+            ],
         )
     )
   return model_parts.TransformerBlock(
@@ -511,16 +541,17 @@ def build_llamalike_transformer(
       dtype=config.parameter_dtype,
   )
   sublayers = []
-  sublayers.append(pz.nn.EmbeddingLookup(emb_table))
+  embedder_sublayers = [pz.nn.EmbeddingLookup(emb_table)]
   if config.activation_dtype != config.parameter_dtype:
-    sublayers.append(pz.nn.CastToDType(config.activation_dtype))
+    embedder_sublayers.append(pz.nn.CastToDType(config.activation_dtype))
 
   if config.tie_embedder_and_logits:
-    sublayers.append(
+    embedder_sublayers.append(
         pz.nn.ConstantRescale(
             by=jnp.sqrt(config.embedding_dim).astype(config.activation_dtype)
         )
     )
+  sublayers.append(pz.nn.NamedGroup("embedder", embedder_sublayers))
 
   if config.use_layer_stack:
     if not isinstance(config.attention_type, AttentionType):
@@ -551,35 +582,40 @@ def build_llamalike_transformer(
       )
 
   sublayers.append(
-      pz.nn.RMSLayerNorm.from_config(
-          name=f"{name}/final_norm",
-          init_base_rng=init_base_rng,
-          across_axes={"embedding": config.embedding_dim},
-          dtype=config.parameter_dtype,
-          epsilon=config.rms_norm_eps,
+      pz.nn.NamedGroup(
+          "final_norm",
+          [
+              pz.nn.RMSLayerNorm.from_config(
+                  name=f"{name}/final_norm",
+                  init_base_rng=init_base_rng,
+                  across_axes={"embedding": config.embedding_dim},
+                  dtype=config.parameter_dtype,
+                  epsilon=config.rms_norm_eps,
+              ),
+          ],
       )
   )
 
   if config.tie_embedder_and_logits:
-    sublayers.append(pz.nn.EmbeddingDecode(emb_table))
+    lm_head = pz.nn.EmbeddingDecode(emb_table)
   else:
-    sublayers.append(
-        pz.nn.Linear.from_config(
-            name=f"{name}/lm_head",
-            init_base_rng=init_base_rng,
-            input_axes={"embedding": config.embedding_dim},
-            output_axes={"vocabulary": config.vocab_size},
-        )
+    lm_head = pz.nn.Linear.from_config(
+        name=f"{name}/lm_head",
+        init_base_rng=init_base_rng,
+        input_axes={"embedding": config.embedding_dim},
+        output_axes={"vocabulary": config.vocab_size},
     )
+  sublayers.append(pz.nn.NamedGroup("lm_head", [lm_head]))
 
   if config.final_logit_softcap:
-    sublayers.append(
-        pz.nn.TanhSoftCap(
-            soft_cap=jnp.array(
-                config.final_logit_softcap, dtype=config.activation_dtype
-            )
+    final_logits = pz.nn.TanhSoftCap(
+        soft_cap=jnp.array(
+            config.final_logit_softcap, dtype=config.activation_dtype
         )
     )
+  else:
+    final_logits = pz.nn.Identity()
+  sublayers.append(pz.nn.NamedGroup("final_logits", [final_logits]))
 
   common_head_axes, _, query_only_head_axes, _ = _head_info(config)
   return model_parts.TransformerLM(
